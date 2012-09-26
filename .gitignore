@@ -4,9 +4,15 @@
 # except for .gitignore
 !.gitignore
 
+# Ignore IntelliJ files
+*.iml
+*.ipr
+
 # Ignore Play! working directory #
 db
+dist
 eclipse
+lib
 log
 logs
 precompiled
