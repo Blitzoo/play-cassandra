@@ -1,6 +1,6 @@
-self: play -> cassandra 0.1
+self: play -> cassandra 0.2
 
 require:
     - play 1.2
-    - com.netflix.astyanax -> astyanax 1.0.2
+    - com.netflix.astyanax -> astyanax 1.0.6
     - org.jetlang -> jetlang 0.2.9
