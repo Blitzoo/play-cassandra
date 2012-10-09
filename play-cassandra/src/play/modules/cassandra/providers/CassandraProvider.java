@@ -2,11 +2,13 @@ package play.modules.cassandra.providers;
 
 import com.google.gson.Gson;
 import com.netflix.astyanax.*;
+import com.netflix.astyanax.connectionpool.HostConnectionPool;
 import com.netflix.astyanax.connectionpool.NodeDiscoveryType;
 import com.netflix.astyanax.connectionpool.OperationResult;
 import com.netflix.astyanax.connectionpool.exceptions.ConnectionException;
 import com.netflix.astyanax.connectionpool.exceptions.NotFoundException;
 import com.netflix.astyanax.connectionpool.impl.ConnectionPoolConfigurationImpl;
+import com.netflix.astyanax.connectionpool.impl.ConnectionPoolType;
 import com.netflix.astyanax.connectionpool.impl.CountingConnectionPoolMonitor;
 import com.netflix.astyanax.impl.AstyanaxConfigurationImpl;
 import com.netflix.astyanax.model.*;
@@ -74,9 +76,10 @@ public class CassandraProvider implements CassandraDB {
 		if ( null == _asConfig ) {
 			_asConfig = new AstyanaxConfigurationImpl()
                     .setRetryPolicy(new ExponentialBackoff(250, 4))
-                    .setDefaultWriteConsistencyLevel(ConsistencyLevel.CL_QUORUM)
-                    .setDefaultReadConsistencyLevel(ConsistencyLevel.CL_QUORUM)
-                    .setDiscoveryType(NodeDiscoveryType.RING_DESCRIBE);
+                    .setDefaultWriteConsistencyLevel(ConsistencyLevel.valueOf(Play.configuration.getProperty("cassandra.concurrency.write.default", "CL_QUORUM")))
+                    .setDefaultReadConsistencyLevel(ConsistencyLevel.valueOf(Play.configuration.getProperty("cassandra.concurrency.read.default", "CL_QUORUM")))
+                    .setDiscoveryType(NodeDiscoveryType.valueOf(Play.configuration.getProperty("cassandra.nodediscoverytype", "NONE")))
+                    .setConnectionPoolType(ConnectionPoolType.valueOf(Play.configuration.getProperty("cassandra.connectionpooltype", "ROUND_ROBIN")));
 		}
 		return _asConfig;
     }
@@ -501,7 +504,7 @@ public class CassandraProvider implements CassandraDB {
 
             if ( o.isNew() ) {
                 CassandraLogger.debug(String.format("Saving new model %s[%s]", cf.getName(), o.getId().toString()));
-                writeConsistencyLevel = ConsistencyLevel.CL_QUORUM;
+                writeConsistencyLevel = ConsistencyLevel.valueOf(Play.configuration.getProperty("cassandra.concurrency.write.model", "CL_QUORUM"));
             } else {
                 CassandraLogger.debug(String.format("Saving updated model %s[%s]", cf.getName(), o.getId().toString()));
             }
@@ -772,7 +775,7 @@ public class CassandraProvider implements CassandraDB {
     private void putCounterColumn(String cfName, String rowKey, String columnName, ColumnField modelField, Object value, Integer attempt) throws IllegalAccessException, ConnectionException {
         Long counterValue;
         try {
-            counterValue = getCounterColumn(cfName, rowKey, columnName, ConsistencyLevel.CL_QUORUM);
+            counterValue = getCounterColumn(cfName, rowKey, columnName, ConsistencyLevel.valueOf(Play.configuration.getProperty("cassandra.concurrency.read.counter", "CL_QUORUM")));
         } catch (NotFoundException e)  {
             counterValue = 0L;
         }
@@ -892,5 +895,24 @@ public class CassandraProvider implements CassandraDB {
         } catch ( Exception e ) {
             throw new DatabaseException(e.getMessage());
         }
+    }
+
+
+    /**
+     * Informational functions
+     */
+    @Override
+    public String getProviderType() {
+        return this.getClass().getSimpleName();
+    }
+
+    @Override
+    public String getHosts() {
+        StringBuilder sb = new StringBuilder();
+        List<? extends HostConnectionPool<?>> pools = _context.getConnectionPool().getActivePools();
+        for ( HostConnectionPool pool : pools ) {
+            sb.append(String.format("  %s\r\n", pool.getHost().getHostName()));
+        }
+        return  sb.toString();
     }
 }
