@@ -14,7 +14,6 @@ public class CassandraSharedHelpers
         int seedPort = Integer.parseInt(Play.configuration.getProperty("cassandra.seedPort", "9160"));
         CassandraLogger.info("Connecting to seed: %s", seeds);
         return new ConnectionPoolConfigurationImpl("MyConnectionPool")
-                .setPort(seedPort)
                 .setMaxConnsPerHost(maxConnsPerHost)
                 .setSeeds(seeds);
     }

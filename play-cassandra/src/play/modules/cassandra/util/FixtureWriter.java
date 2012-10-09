@@ -4,6 +4,7 @@ import com.netflix.astyanax.AstyanaxContext;
 import com.netflix.astyanax.Cluster;
 import com.netflix.astyanax.connectionpool.exceptions.ConnectionException;
 import com.netflix.astyanax.connectionpool.impl.CountingConnectionPoolMonitor;
+import com.netflix.astyanax.ddl.ColumnDefinition;
 import com.netflix.astyanax.ddl.ColumnFamilyDefinition;
 import com.netflix.astyanax.ddl.KeyspaceDefinition;
 import com.netflix.astyanax.impl.AstyanaxConfigurationImpl;
@@ -73,76 +74,136 @@ public class FixtureWriter {
     
     private void addColumnFamily(Cluster cluster, String keyspace, Class entity) throws ConnectionException {
         String family = entity.getName().replaceAll("models\\.", "");
+        String entitySimpleName = entity.getSimpleName();
+
         if (MapModel.class.isAssignableFrom(entity)) {
-            if ( null != cluster.getKeyspace(keyspace).describeKeyspace().getColumnFamily(family)) {
-                CassandraLogger.info("MapModel family: %s already exists", family);
-                return;
+            addMapModelFamily(cluster, keyspace, family, entitySimpleName);
+        }
+
+        ColumnFamilyDefinition cfDef = cluster.getKeyspace(keyspace).describeKeyspace().getColumnFamily(family);
+        if ( null != cfDef) {
+            CassandraLogger.info("Cassandra.Model family: %s already exists", family);
+
+            boolean updateRequired = false;
+            List<ColumnDefinition> columnDefinitions = cfDef.getColumnDefinitionList();
+            for ( ColumnField indexField : ModelReflector.reflectorFor(family).getIndexFields()) {
+                CassandraLogger.info("Checking INDEX for field %s", indexField.getName());
+                boolean foundIndexField = false;
+                for ( ColumnDefinition columnDefinition : columnDefinitions ) {
+                    if (columnDefinition.getName().equals(indexField.getName())) {
+                        foundIndexField = true;
+                        break;
+                    }
+                }
+                if ( !foundIndexField ) {
+                    CassandraLogger.info("Not found! Adding INDEX for field %s", indexField.getName());
+                    cfDef.addColumnDefinition(cfDef.makeColumnDefinition()
+                            .setName(indexField.getName())
+                            .setValidationClass("UTF8Type")
+                            .setIndex(String.format("%s_%s_index", entitySimpleName, indexField.getName().toLowerCase()), "KEYS")
+                    );
+                    updateRequired = true;
+                }
             }
-            CassandraLogger.info("Creating MapModel family: %s", family);
-            ColumnFamilyDefinition cfDef = cluster.makeColumnFamilyDefinition()
-                                            .setName(family)
-                                            .setKeyspace(keyspace)
-                                            .setComparatorType("CompositeType(UTF8Type, UTF8Type, UTF8Type)")
-                                            .setKeyValidationClass("UTF8Type")
-                                            .setDefaultValidationClass("UTF8Type");
+            if ( updateRequired ) {
+                cluster.updateColumnFamily(cfDef);
+            }
+        } else {
+            CassandraLogger.info("Creating Model family: %s", family);
+            cfDef = cluster.makeColumnFamilyDefinition()
+                                                .setName(family)
+                                                .setKeyspace(keyspace)
+                                                .setComparatorType("UTF8Type")
+                                                .setKeyValidationClass("UTF8Type");
+
             for ( ColumnField indexField : ModelReflector.reflectorFor(family).getIndexFields()) {
                 CassandraLogger.info("Adding INDEX for field %s", indexField.getName());
                 cfDef.addColumnDefinition(cfDef.makeColumnDefinition()
-                    .setName(indexField.getName())
-                    .setValidationClass("UTF8Type")
-                    .setIndex(String.format("%s_%s_index", entity.getSimpleName(), indexField.getName().toLowerCase()), "KEYS")
+                        .setName(indexField.getName())
+                        .setValidationClass("UTF8Type")
+                        .setIndex(String.format("%s_%s_index", entitySimpleName, indexField.getName().toLowerCase()), "KEYS")
+                );
+            }
+
+            cluster.addColumnFamily(cfDef);
+
+            // Regular models continue
+            Field[] fields = entity.getFields();
+            Boolean addCountersFamily = false;
+            for (Field field : fields) {
+                if (field.getAnnotation(play.modules.cassandra.annotations.Counter.class) != null){
+                    addCountersFamily = true;
+                }
+            }
+            if (addCountersFamily) {
+                String counterFamily = String.format("%s_Counters", family);
+                if ( null != cluster.getKeyspace(keyspace).describeKeyspace().getColumnFamily(counterFamily)) {
+                    CassandraLogger.info("MapModel family: %s already exists", family);
+                    return;
+                }
+                cluster.addColumnFamily(
+                        cluster.makeColumnFamilyDefinition()
+                                .setName(counterFamily)
+                                .setKeyspace(keyspace)
+                                .setDefaultValidationClass("CounterColumnType")
+                                .setComparatorType("UTF8Type")
+                                .setReplicateOnWrite(true)
+                );
+            }
+        }
+    }
+
+    private void addMapModelFamily(Cluster cluster, String keyspace, String family, String entitySimpleName) throws ConnectionException {
+        ColumnFamilyDefinition cfDef = cluster.getKeyspace(keyspace).describeKeyspace().getColumnFamily(family);
+        if ( null != cfDef) {
+            // If the column family already exists, ensure any new index fields are added to the metadata
+            CassandraLogger.info("MapModel family: %s already exists", family);
+
+            boolean updateRequired = false;
+            List<ColumnDefinition> columnDefinitions = cfDef.getColumnDefinitionList();
+            for ( ColumnField indexField : ModelReflector.reflectorFor(family).getIndexFields()) {
+                CassandraLogger.info("Checking INDEX for field %s", indexField.getName());
+                boolean foundIndexField = false;
+                for ( ColumnDefinition columnDefinition : columnDefinitions ) {
+                    if (columnDefinition.getName().equals(indexField.getName())) {
+                        foundIndexField = true;
+                        break;
+                    }
+                }
+                if ( !foundIndexField ) {
+                    CassandraLogger.info("Not found! Adding INDEX for field %s", indexField.getName());
+                    cfDef.addColumnDefinition(cfDef.makeColumnDefinition()
+                            .setName(indexField.getName())
+                            .setValidationClass("UTF8Type")
+                            .setIndex(String.format("%s_%s_index", entitySimpleName, indexField.getName().toLowerCase()), "KEYS")
+                    );
+                    updateRequired = true;
+                }
+            }
+            if ( updateRequired ) {
+                cluster.updateColumnFamily(cfDef);
+            }
+        } else {
+            // If the column Family does not yet exist, create it and all necessary indexes
+            CassandraLogger.info("Creating MapModel family: %s", family);
+            cfDef = cluster.makeColumnFamilyDefinition()
+                    .setName(family)
+                    .setKeyspace(keyspace)
+                    .setComparatorType("CompositeType(UTF8Type, UTF8Type, UTF8Type)")
+                    .setKeyValidationClass("UTF8Type")
+                    .setDefaultValidationClass("UTF8Type");
+
+            for ( ColumnField indexField : ModelReflector.reflectorFor(family).getIndexFields()) {
+                CassandraLogger.info("Adding INDEX for field %s", indexField.getName());
+                cfDef.addColumnDefinition(cfDef.makeColumnDefinition()
+                        .setName(indexField.getName())
+                        .setValidationClass("UTF8Type")
+                        .setIndex(String.format("%s_%s_index", entitySimpleName, indexField.getName().toLowerCase()), "KEYS")
                 );
             }
             cluster.addColumnFamily(cfDef);
-
-            return;
         }
-
-        if ( null != cluster.getKeyspace(keyspace).describeKeyspace().getColumnFamily(family)) {
-            CassandraLogger.info("Cassandra.Model family: %s already exists", family);
-            return;
-        }
-        CassandraLogger.info("Creating Model family: %s", family);
-        ColumnFamilyDefinition cfDef = cluster.makeColumnFamilyDefinition()
-                                            .setName(family)
-                                            .setKeyspace(keyspace)
-                                            .setComparatorType("UTF8Type")
-                                            .setKeyValidationClass("UTF8Type");
-
-        for ( ColumnField indexField : ModelReflector.reflectorFor(family).getIndexFields()) {
-            CassandraLogger.info("Adding INDEX for field %s", indexField.getName());
-            cfDef.addColumnDefinition(cfDef.makeColumnDefinition()
-                    .setName(indexField.getName())
-                    .setValidationClass("UTF8Type")
-                    .setIndex(String.format("%s_%s_index", entity.getSimpleName(), indexField.getName().toLowerCase()), "KEYS")
-            );
-        }
-
-        cluster.addColumnFamily(cfDef);
-
-        // Regular models continue
-        Field[] fields = entity.getFields();
-        Boolean addCountersFamily = false;
-        for (Field field : fields) {
-            if (field.getAnnotation(play.modules.cassandra.annotations.Counter.class) != null){
-                addCountersFamily = true;
-            }
-        }
-        if (addCountersFamily) {
-            String counterFamily = String.format("%s_Counters", family);
-            if ( null != cluster.getKeyspace(keyspace).describeKeyspace().getColumnFamily(counterFamily)) {
-                CassandraLogger.info("MapModel family: %s already exists", family);
-                return;
-            }
-            cluster.addColumnFamily(
-                    cluster.makeColumnFamilyDefinition()
-                            .setName(counterFamily)
-                            .setKeyspace(keyspace)
-                            .setDefaultValidationClass("CounterColumnType")
-                            .setComparatorType("UTF8Type")
-                            .setReplicateOnWrite(true)
-            );
-        }
+        return;
     }
 
     public void run() throws Exception {

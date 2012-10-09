@@ -1,6 +1,9 @@
 package play.modules.cassandra;
 
+import com.netflix.astyanax.connectionpool.NodeDiscoveryType;
+import com.netflix.astyanax.connectionpool.impl.ConnectionPoolType;
 import com.netflix.astyanax.mapping.Id;
+import com.netflix.astyanax.model.ConsistencyLevel;
 import play.Play;
 import play.PlayPlugin;
 import play.classloading.ApplicationClasses.ApplicationClass;
@@ -20,7 +23,7 @@ import java.math.BigDecimal;
 import java.util.*;
 
 public class CassandraPlugin extends PlayPlugin {
-	public static final String VERSION = "0.1";
+	public static final String VERSION = "0.4";
 	private final CassandraEnhancer e_ = new CassandraEnhancer();
     private static CassandraDB _instance;
     private static CassandraMonitor _cassandraMonitor;
@@ -37,7 +40,28 @@ public class CassandraPlugin extends PlayPlugin {
         return _instance;
     }
 
-	@Override
+    @Override
+    public String getStatus() {
+        ConsistencyLevel defaultWriteConsistency = ConsistencyLevel.valueOf(Play.configuration.getProperty("cassandra.concurrency.write.default", "CL_QUORUM"));
+        ConsistencyLevel defaultReadConsistency = ConsistencyLevel.valueOf(Play.configuration.getProperty("cassandra.concurrency.read.default", "CL_QUORUM"));
+        NodeDiscoveryType nodeDiscoveryType = NodeDiscoveryType.valueOf(Play.configuration.getProperty("cassandra.nodediscoverytype", "NONE"));
+        ConnectionPoolType connectionPoolType = ConnectionPoolType.valueOf(Play.configuration.getProperty("cassandra.connectionpooltype", "BAG"));
+
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Cassandra Datasource\r\n");
+        sb.append("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n");
+        sb.append(String.format("Provider Type:             %s\r\n", _instance.getProviderType()));
+        sb.append(String.format("Default Write Consistency: %s\r\n", defaultWriteConsistency.toString()));
+        sb.append(String.format("Default Read Consistency:  %s\r\n", defaultReadConsistency.toString()));
+        sb.append(String.format("Node Discovery Type:       %s\r\n", nodeDiscoveryType.toString()));
+        sb.append(String.format("Connection Pool Type:      %s\r\n", connectionPoolType.toString()));
+        sb.append("Hosts:\r\n" + _instance.getHosts());
+
+        return sb.toString();
+    }
+
+    @Override
 	public void onApplicationStart() {
         _cassandraMonitor = new CassandraMonitor(_instance);
         Boolean useMemDb = Boolean.parseBoolean(Play.configuration.getProperty("cassandra.usememdb", "false"));

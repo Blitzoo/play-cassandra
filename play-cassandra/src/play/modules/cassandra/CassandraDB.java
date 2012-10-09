@@ -37,4 +37,8 @@ public interface CassandraDB {
     public int deleteComposite(String cfName, String key, String dictionary, String dictKey);
 
     public List<? extends play.db.Model> findByKey(Class<? extends play.db.Model> clazz, ColumnFamily<String, String> cf, String key, Object value);
+
+    public String getProviderType();
+
+    String getHosts();
 }

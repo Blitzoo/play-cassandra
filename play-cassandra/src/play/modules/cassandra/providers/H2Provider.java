@@ -729,4 +729,17 @@ public class H2Provider implements CassandraDB {
         }
         return  models;
     }
+
+    /**
+     * Informational functions
+     */
+    @Override
+    public String getProviderType() {
+        return this.getClass().getSimpleName();
+    }
+
+    @Override
+    public String getHosts() {
+        return "  Database resides in-memory";
+    }
 }
