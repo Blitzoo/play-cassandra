@@ -542,8 +542,10 @@ public class H2Provider implements CassandraDB {
                     }
                     if ( field.isIdentity()) {
                         stmt.append(String.format("`%s` varchar(255) not null primary key", field.getName()));
-                    } else {
+                    } else if ( field.isCounter() || field.isIndex() || field.isList() ) {
                         stmt.append(String.format("`%s` varchar(2000)", field.getName()));
+                    } else {
+                        stmt.append(String.format("`%s` text", field.getName()));
                     }
                     fieldCount++;
                 }
