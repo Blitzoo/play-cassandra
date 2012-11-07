@@ -15,6 +15,7 @@ eclipse
 lib
 log
 logs
+modules
 precompiled
 tmp
 test-result

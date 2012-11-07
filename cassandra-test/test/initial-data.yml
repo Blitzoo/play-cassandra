@@ -1,0 +1,38 @@
+Account(dummy):
+  guid: dummyone
+  
+Account(samuel):
+  guid: 5b74e588-2653-4ddb-939e-f03045b214ee
+  coins: 809.45
+  xp: 1238
+
+Product(fish):
+  sku: com.blitzoo.slotspot.testPurchase
+
+Product(shark):
+  sku: com.blitzoo.slotspot.testPurchase2
+  
+Product(whale):
+  sku: slotspot-0002a
+
+Order(testorder):
+  id: findmenow
+
+Order(test2order):
+  id: testfind
+  user: samuel
+  quantity: 5
+  receiptStatus: fine
+
+Game(funone):
+  guid: fun
+  name: A Fun Game
+
+Game(boringone):
+  guid: boring
+  name: A Boring Game
+
+Room(defaultroom):
+  guid: garber
+  name: Rawk
+  games: [funone, boringone]

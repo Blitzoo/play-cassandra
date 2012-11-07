@@ -1,0 +1,12 @@
+# Application dependencies
+
+require:
+    - play
+    - cassandra -> play-cassandra 0.4.1
+
+repositories:
+    - My local modules:
+        type:     local
+        artifact: ${application.path}/../[module]
+        contains:
+            - cassandra
