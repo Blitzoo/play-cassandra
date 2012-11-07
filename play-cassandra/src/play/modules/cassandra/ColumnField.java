@@ -10,6 +10,8 @@ import java.lang.reflect.ParameterizedType;
 import java.math.BigDecimal;
 import java.util.Collection;
 
+import static play.modules.cassandra.CassandraLogger.trace;
+
 /**
  * Encapsulates a column inside a model.
  *
@@ -125,7 +127,7 @@ public class ColumnField {
         return _sourceField.get(o);
     }
 
-    public long getLong(Object o ) throws IllegalAccessException {
+    public long getLong(Object o) throws IllegalAccessException {
         return _sourceField.getLong(o);
     }
 
@@ -150,13 +152,23 @@ public class ColumnField {
      */
     public Long toLong(Object value) {
         Long targetValue = null;
+        if ( null == value ) {
+            trace("toLong: value - %s", "null");
+        } else {
+            trace("toLong: value - %s", value.toString());
+        }
         if ( _decimal ) {
             BigDecimal decimalValue = (BigDecimal)value;
             if ( null != decimalValue) {
                 targetValue = decimalValue.multiply(new BigDecimal(Math.pow(10, _scale))).longValue();
             }
-        } else if ( Long.class.isAssignableFrom(_type)) {
+        } else if ( Long.class.isAssignableFrom(_type) || long.class.isAssignableFrom(_type)) {
             targetValue = (Long)value;
+            if ( null == targetValue ) {
+                trace("toLong: converted LONG target value - null");
+            } else {
+                trace("toLong: converted LONG target value - %d", targetValue);
+            }
         }
         return targetValue;
     }

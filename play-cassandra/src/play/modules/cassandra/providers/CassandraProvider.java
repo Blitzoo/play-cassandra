@@ -27,7 +27,7 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import static play.modules.cassandra.CassandraLogger.debug;
+import static play.modules.cassandra.CassandraLogger.*;
 
 
 @SuppressWarnings("unchecked")
@@ -91,13 +91,7 @@ public class CassandraProvider implements CassandraDB {
     public List<? extends play.db.Model> all(Class<? extends play.db.Model> clazz) {
         ColumnFamily<String, String> cf = ModelReflector.reflectorFor(clazz).getColumnFamily();
         Rows<String, String> rows = getAllRows(cf);
-        List<Model> modelList = new ArrayList<Model>();
-        for ( Row<String,String> row : rows ) {
-            if ( ! row.getColumns().isEmpty() ) {
-                Model model = parseColumns(clazz, row.getColumns(), cf.getName(), row.getKey());
-                modelList.add(model);
-            }
-        }
+        List<Model> modelList = new ModelRowsList<Model>(rows, clazz);
         return modelList;
     }
 
@@ -143,13 +137,13 @@ public class CassandraProvider implements CassandraDB {
     public void deleteAll(ColumnFamily<String, String> cf) {
         try {
             //Rows<String, String> rows = getAllRows(cf);
-            CassandraLogger.info("Deleting column family: %s", cf.getName());
             final Keyspace keyspace = getKeyspace();
 
             // TruncateColumnFamily too slow - much faster to use Range of indexes with callback using getAllRows special query
             //keyspace.truncateColumnFamily(cf);
             final ColumnFamily<String, String> innerCf = cf;
             final MutationBatch mb = keyspace.prepareMutationBatch();
+            final int[] mbCount = {0,0};
             keyspace.prepareQuery(cf)
                     .getAllRows()
                     .setRowLimit(100)
@@ -159,8 +153,22 @@ public class CassandraProvider implements CassandraDB {
                         @Override
                         public void success(Rows<String, String> rows) {
                             for (Row<String, String> row : rows) {
-                                CassandraLogger.debug("DELETING %s[%s]", innerCf.getName(), row.getKey());
-                                mb.withRow(innerCf, row.getKey()).delete();
+                                mbCount[1]++;
+                                if ( !row.getColumns().isEmpty() ) {
+                                    String rowKey = row.getKey();
+                                    mb.withRow(innerCf, rowKey).delete();
+                                    mbCount[0]++;
+                                    if ( mbCount[0] >= 80 ) {
+                                        try {
+                                            mbCount[0] = 0;
+                                            mb.execute();
+                                            mb.discardMutations();
+                                            debug("Executed DELETE mutation");
+                                        } catch (ConnectionException e) {
+                                            error(e, "Unable to execute mutationBatch while in Callback");
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -169,7 +177,10 @@ public class CassandraProvider implements CassandraDB {
                             return false;
                         }
                     });
-            mb.execute();
+
+            if ( !mb.isEmpty() ) {
+                mb.execute();
+            }
             // Determine if we have any counters
             ModelReflector reflector = ModelReflector.reflectorFor(cf.getName());
             if ( reflector.hasCounters() ) {
@@ -503,10 +514,7 @@ public class CassandraProvider implements CassandraDB {
             }
 
             if ( o.isNew() ) {
-                CassandraLogger.debug(String.format("Saving new model %s[%s]", cf.getName(), o.getId().toString()));
                 writeConsistencyLevel = ConsistencyLevel.valueOf(Play.configuration.getProperty("cassandra.concurrency.write.model", "CL_QUORUM"));
-            } else {
-                CassandraLogger.debug(String.format("Saving updated model %s[%s]", cf.getName(), o.getId().toString()));
             }
 
             Keyspace keyspace = getKeyspace();
@@ -521,7 +529,6 @@ public class CassandraProvider implements CassandraDB {
                 String columnName = field.getName();
                 if ( field.isCounter() ) {
                     if ( saveCounters ) {
-                        debug("Performing putCounter on %s", columnName);
                         putCounterColumn(o, cf.getName(), o.getId().toString(), columnName, field);
                     }
                 } else {
@@ -529,12 +536,7 @@ public class CassandraProvider implements CassandraDB {
                 }
             }
 
-            if ( o.isNew() ) {
-                mutationBatch.execute();
-            } else {
-                //mutationBatch.executeAsync();
-                mutationBatch.execute();
-            }
+            mutationBatch.execute();
         } catch (Exception e) {
             CassandraLogger.error(e, "Could not save a Cassandra object");
             throw new UnexpectedException(e);
@@ -611,18 +613,19 @@ public class CassandraProvider implements CassandraDB {
 	 */
 	private void putColumn(Model o, ColumnListMutation<String> columnListMutation, String columnName, ColumnField modelField) {
 		try {
-            if ( null == modelField.get(o)) {
+            Object initialValue = modelField.get(o);
+            if ( null == initialValue) {
                 columnListMutation.putEmptyColumn(columnName, null);
                 return;
             }
 			Class<?> objClazz = modelField.getType();
 			if ( play.db.Model.class.isAssignableFrom(objClazz) ) {
-				play.db.Model model = (play.db.Model)modelField.get(o);
+				play.db.Model model = (play.db.Model)initialValue;
                 columnListMutation.putColumn(columnName, model._key().toString(), null);
             } else if ( modelField.isList() ) {
                 if ( play.db.Model.class.isAssignableFrom(modelField.genericType())) {
                     List<String> idList = new ArrayList<String>();
-                    List<play.db.Model> relations = (List<play.db.Model>)modelField.get(o);
+                    List<play.db.Model> relations = (List<play.db.Model>)initialValue;
                     if ( null != relations ) {
                         for ( play.db.Model model : relations ) {
                             if ( null != model && null != model._key() ) {
@@ -632,7 +635,7 @@ public class CassandraProvider implements CassandraDB {
                     }
                     columnListMutation.putColumn(columnName, new Gson().toJson(idList), null);
                 } else if ( MapModel.class.isAssignableFrom(modelField.genericType())) {
-                    List<MapModel> mapModels = (List<MapModel>)modelField.get(o);
+                    List<MapModel> mapModels = (List<MapModel>)initialValue;
                     for ( MapModel mapModel : mapModels ) {
                         if ( mapModel.isChanged() ) {
                             writeComposite(mapModel);
@@ -640,7 +643,7 @@ public class CassandraProvider implements CassandraDB {
                     }
                 }
             } else if ( Date.class.isAssignableFrom(objClazz) ) {
-				columnListMutation.putColumn(columnName, (Date)modelField.get(o), null);
+				columnListMutation.putColumn(columnName, (Date)initialValue, null);
 			} else if ( objClazz.isAssignableFrom(Boolean.TYPE)) {
 				columnListMutation.putColumn(columnName, modelField.getBoolean(o), null);
             } else if ( objClazz.isAssignableFrom(Boolean.class)) {
@@ -653,10 +656,9 @@ public class CassandraProvider implements CassandraDB {
 				columnListMutation.putColumn(columnName, modelField.getInt(o), null);
             } else if ( objClazz.isAssignableFrom(Integer.class)) {
                 columnListMutation.putColumn(columnName, (Integer)modelField.get(o), null);
-            } else if ( objClazz.isAssignableFrom(Long.TYPE)) {
-				columnListMutation.putColumn(columnName, modelField.getLong(o), null);
-            } else if ( objClazz.isAssignableFrom(Long.class)) {
-                columnListMutation.putColumn(columnName, (Long)modelField.get(o), null);
+            } else if ( Long.TYPE.isAssignableFrom(objClazz) || Long.class.isAssignableFrom(objClazz)) {
+                trace("putColumn: [%s] - Handling as long %d", columnName, modelField.toLong(initialValue));
+                columnListMutation.putColumn(columnName, modelField.toLong(initialValue), null);
             } else {
 				Object value = modelField.get(o);
 				if ( null == value ) {
@@ -769,44 +771,54 @@ public class CassandraProvider implements CassandraDB {
      * @throws IllegalAccessException Occurs when a column is accessed inappropriately (for example, attempting to save to a null)
      */
     private void putCounterColumn(Object o, String cfName, String rowKey, String columnName, ColumnField modelField) throws IllegalAccessException, ConnectionException {
-        putCounterColumn(cfName, rowKey, columnName, modelField, modelField.get(o), 1);
+        putCounterColumn(cfName, rowKey, columnName, modelField.toLong(modelField.get(o)), 1);
     }
 
-    private void putCounterColumn(String cfName, String rowKey, String columnName, ColumnField modelField, Object value, Integer attempt) throws IllegalAccessException, ConnectionException {
+    private void putCounterColumn(String cfName, String rowKey, String columnName, Long targetValue, Integer attempt) throws IllegalAccessException, ConnectionException {
+        trace("PutCounter: [%s::%s] %s - Attempt %d", cfName, rowKey, columnName, attempt);
         Long counterValue;
         try {
             counterValue = getCounterColumn(cfName, rowKey, columnName, ConsistencyLevel.valueOf(Play.configuration.getProperty("cassandra.concurrency.read.counter", "CL_QUORUM")));
+            trace("PutCounter: [%s::%s] %s - Found counter value %d", cfName, rowKey, columnName, counterValue);
         } catch (NotFoundException e)  {
+            trace("PutCounter: [%s::%s] %s - Not Found", cfName, rowKey, columnName);
             counterValue = 0L;
         }
 
         if ( null == counterValue ) {
+            trace("PutCounter: [%s::%s] %s - Dealing with null value", cfName, rowKey, columnName);
             counterValue = 0L;
         }
 
-        Long targetValue = modelField.toLong(value);
-
         if ( null == targetValue ) {
+            trace("PutCounter: [%s::%s] %s - targetValue is null", cfName, rowKey, columnName);
             targetValue = 0L;
+        } else {
+            trace("PutCounter: [%s::%s] %s - targetValue is %d", cfName, rowKey, columnName, targetValue);
         }
 
+        trace("PutCounter: [%s::%s] %s - Comparing %d with %d", cfName, rowKey, columnName, targetValue, counterValue, targetValue);
+
         if ( !counterValue.equals(targetValue) ) {
+            trace("PutCounter: [%s::%s] %s - is set to %d, but expected %d", cfName, rowKey, columnName, counterValue, targetValue);
             ColumnFamily<String, String> cf = ModelReflector.reflectorFor(cfName).getCounterColumnFamily();
             Keyspace keyspace = getKeyspace();
-            debug("Column %s is set to %d, but expected %d", columnName, counterValue, targetValue);
             Long diff = targetValue - counterValue;
-            debug("Column %s incrementing by %d", columnName, diff);
+            trace("PutCounter: [%s::%s] %s - incrementing by %d", cfName, rowKey, columnName, diff);
 
             keyspace.prepareColumnMutation(cf, rowKey, columnName)
                     .incrementCounterColumn(diff)
                     .execute();
+            trace("Put %d in [%s::%s] %s", targetValue, cfName, rowKey, columnName);
 
             // Call self - goal is to read the value, ensure it matches expectations,
             // and re-increment if another change has been persisted since our update
             if ( attempt > 3 ) {
                 throw new UnexpectedException(String.format("Giving up on putCounterColumn after %s attempts attempting to save %d into %s on %s (found value: %d)", attempt, targetValue, columnName, cfName, counterValue));
             }
-            putCounterColumn(cfName, rowKey, columnName, modelField, value, attempt+1);
+            putCounterColumn(cfName, rowKey, columnName, targetValue, attempt+1);
+        } else {
+            trace("PutCounter: [%s::%s] %s - Target %d matches current %d", cfName, rowKey, columnName, targetValue, counterValue);
         }
     }
 
@@ -823,6 +835,7 @@ public class CassandraProvider implements CassandraDB {
 
     private Long getCounterColumn(String cfName, String rowKey, String columnName, ConsistencyLevel consistencyLevel) throws ConnectionException {
         Long value;
+        trace("getCounterColumn: [%s::%s] %s - START", cfName, rowKey, columnName);
 
         Keyspace keyspace = getKeyspace();
 
@@ -835,8 +848,10 @@ public class CassandraProvider implements CassandraDB {
                     .getResult();
 
             value = result.getLongValue();
+            trace("getCounterColumn: [%s::%s] %s - Got value %d", cfName, rowKey, columnName, value);
         } catch ( NotFoundException e ) {
             value = null;
+            trace("getCounterColumn: [%s::%s] %s - Got null value", cfName, rowKey, columnName, value);
         }
         return value;
 	}
@@ -851,24 +866,40 @@ public class CassandraProvider implements CassandraDB {
 
     public <T> T getColumnValue(String cfName, String rowKey, String columnName) {
         try {
-            T value;
+            ModelReflector reflector = ModelReflector.reflectorFor(cfName);
 
-            Keyspace keyspace = getKeyspace();
+            if ( reflector.getColumnField(columnName).isCounter()) {
+                return (T)getCounterColumn(cfName, rowKey, columnName);
+            } else {
+                trace("getColumnValue: [%s::%s] %s - Non-counter", cfName, rowKey, columnName );
+                T value;
+                Keyspace keyspace = getKeyspace();
 
-            final ColumnFamily<String, String> CF_COUNTER = ModelReflector.reflectorFor(cfName).getCounterColumnFamily();
-
-            try {
-                com.netflix.astyanax.model.Column<String> result = keyspace.prepareQuery(CF_COUNTER)
-                        .getKey(rowKey)
-                        .getColumn(columnName)
-                        .execute()
-                        .getResult();
-                value = (T)new Long(result.getStringValue());
-            } catch ( NotFoundException e ) {
-                value = null;
+                ColumnFamily<String,String> columnFamily = reflector.getColumnFamily();
+                try {
+                    com.netflix.astyanax.model.Column<String> result = keyspace.prepareQuery(columnFamily)
+                            .getKey(rowKey)
+                            .getColumn(columnName)
+                            .execute()
+                            .getResult();
+                    Class clazz = reflector.getColumnField(columnName).getType();
+                    trace("getColumnValue: [%s::%s] %s - Found %s", cfName, rowKey, columnName, result.toString() );
+                    if ( Long.class.isAssignableFrom(clazz)) {
+                        value = (T)new Long(result.getLongValue());
+                    } else {
+                        value = (T)result.getStringValue();
+                    }
+                    debug("Reading [%s::%s]%s - found %s", columnFamily.getName(), rowKey, columnName, value);
+                } catch ( NotFoundException e ) {
+                    debug("Reading [%s::%s]%s - found EXCEPTION", columnFamily.getName(), rowKey, columnName);
+                    value = null;
+                } catch ( NumberFormatException nfe ) {
+                    value = null;
+                }
+                debug("Reading [%s::%s]%s - returning %s", columnFamily.getName(), rowKey, columnName, value.toString());
+                return value;
             }
-            return value;
-        } catch ( Exception e ) {
+        } catch ( ConnectionException e ) {
             throw new UnexpectedException(e);
         }
     }
@@ -882,15 +913,20 @@ public class CassandraProvider implements CassandraDB {
             }
 
             if ( columnField.isCounter()) {
-                putCounterColumn(cfName, rowKey, columnName, columnField, value, 1);
+                putCounterColumn(cfName, rowKey, columnName, columnField.toLong(value), 1);
             } else {
                 ColumnFamily<String, String> cf = reflector.getColumnFamily();
                 Keyspace keyspace = getKeyspace();
 
-                keyspace.prepareColumnMutation(cf, rowKey, columnName)
-                        .putValue(value.toString(), null)
-                        //.executeAsync();
-                        .execute();
+                ColumnMutation mutation = keyspace.prepareColumnMutation(cf, rowKey, columnName);
+                Execution query;
+
+                if ( Long.class.isAssignableFrom(columnField.getType()) || Long.TYPE.isAssignableFrom(columnField.getType())) {
+                    query = mutation.putValue(columnField.toLong(value), null);
+                } else {
+                    query = mutation.putValue(value.toString(), null);
+                }
+                query.execute();
             }
         } catch ( Exception e ) {
             throw new DatabaseException(e.getMessage());
@@ -914,5 +950,227 @@ public class CassandraProvider implements CassandraDB {
             sb.append(String.format("  %s\r\n", pool.getHost().getHostName()));
         }
         return  sb.toString();
+    }
+
+    private class ModelRowsList<T extends play.db.Model> implements List<T> {
+        private int size = -1;
+        private ColumnFamily<String, String> cf;
+        private final Rows<String, String> rows;
+        private final Class<? extends play.db.Model> clazz;
+        private final List<String> ignoredKeys = new ArrayList<String>();
+
+        public ModelRowsList(Rows<String, String> rows, Class<? extends play.db.Model> clazz) {
+            this.rows = rows;
+            this.clazz = clazz;
+            this.cf = ModelReflector.reflectorFor(clazz).getColumnFamily();
+        }
+
+        // TODO: Create a count iterator that does not parse rows into domain objects
+        @Override
+        public int size() {
+            if ( size < 0 ) {
+                size = 0;
+                for ( Object obj : this ) {
+                    size++;
+                }
+            }
+            return size;
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return ( size() == 0);
+        }
+
+        @Override
+        public boolean contains(Object o) {
+            for ( Object model : this ) {
+                if ( model.equals(o)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public Iterator<T> iterator() {
+            return new ModelRowsListIterator(rows.iterator());
+        }
+
+        @Override
+        public Object[] toArray() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <T> T[] toArray(T[] ts) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean add(T t) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean remove(Object o) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean containsAll(Collection<?> objects) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean addAll(Collection<? extends T> ts) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean addAll(int i, Collection<? extends T> ts) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean removeAll(Collection<?> objects) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean retainAll(Collection<?> objects) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void clear() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return rows.equals(o);
+        }
+
+        @Override
+        public int hashCode() {
+            return rows.hashCode();
+        }
+
+        @Override
+        public T get(int i) {
+            int j = 0;
+            for ( T model : this ) {
+                if ( j == i ) {
+                    return model;
+                }
+                j++;
+            }
+            return null;
+        }
+
+        @Override
+        public T set(int i, T t) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void add(int i, T t) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public T remove(int i) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public int indexOf(Object o) {
+            int indexNum = 0;
+            for ( Object model : this ) {
+                if ( model.equals(this)) {
+                    return indexNum;
+                }
+                indexNum++;
+            }
+            return -1;
+        }
+
+        @Override
+        public int lastIndexOf(Object o) {
+            int foundNum = -1;
+            int indexNum = 0;
+            for ( Object model : this ) {
+                if ( model.equals(this)) {
+                    foundNum = indexNum;
+                }
+                indexNum++;
+            }
+            return foundNum;
+        }
+
+        @Override
+        public ListIterator<T> listIterator() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ListIterator<T> listIterator(int i) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<T> subList(int i, int i1) {
+            throw new UnsupportedOperationException();
+        }
+
+        private class ModelRowsListIterator<T extends Model> implements Iterator<T> {
+            private Row<String, String> current;
+            private Row<String, String> next;
+            private Iterator<Row<String, String>> rowIterator;
+            public ModelRowsListIterator(Iterator<Row<String, String>> iterator) {
+                rowIterator = iterator;
+                primeNext();
+            }
+
+            @Override
+            public boolean hasNext() {
+                return (null != next);
+            }
+
+            private void primeNext() {
+                next = null;
+                while ( rowIterator.hasNext() ) {
+                    Row<String, String> row = rowIterator.next();
+                    ColumnList<String> columns = row.getColumns();
+                    if ( !columns.isEmpty() && !ignoredKeys.contains(row.getKey())) {
+                        next = row;
+                        break;
+                    }
+                }
+            }
+
+            @Override
+            public T next() {
+                if ( null == next ) {
+                    throw new NoSuchElementException();
+                }
+
+                current = next;
+                ColumnList<String> columns = next.getColumns();
+                T model = parseColumns(clazz, columns, cf.getName(), next.getKey());
+
+                primeNext();
+
+                return model;
+            }
+
+            @Override
+            public void remove() {
+                ignoredKeys.add(current.getKey());
+                --size;
+            }
+        }
+
     }
 }

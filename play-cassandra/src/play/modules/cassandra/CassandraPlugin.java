@@ -23,7 +23,7 @@ import java.math.BigDecimal;
 import java.util.*;
 
 public class CassandraPlugin extends PlayPlugin {
-	public static final String VERSION = "0.4.3";
+	public static final String VERSION = "0.5";
 	private final CassandraEnhancer e_ = new CassandraEnhancer();
     private static CassandraDB _instance;
     private static CassandraMonitor _cassandraMonitor;
@@ -38,6 +38,15 @@ public class CassandraPlugin extends PlayPlugin {
             }
         }
         return _instance;
+    }
+
+    public static void deleteMapModels() {
+        List<Class> entities = Play.classloader.getAnnotatedClasses(play.modules.cassandra.annotations.Entity.class);
+        for ( Class entity : entities ) {
+            if ( MapModel.class.isAssignableFrom(entity)) {
+                _instance.deleteAll(ModelReflector.reflectorFor(entity.getSimpleName()).getColumnFamily());
+            }
+        }
     }
 
     @Override

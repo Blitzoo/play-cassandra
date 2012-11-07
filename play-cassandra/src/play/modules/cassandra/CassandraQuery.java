@@ -11,10 +11,7 @@ public class CassandraQuery<T extends Model> {
     }
 
     public List<T> fetch() {
-        if ( _results.isEmpty() ) {
-            return new ArrayList<T>();
-        }
-        return fetch(_results.size());
+        return _results;
     }
 
     public List<T> fetch(int max) {

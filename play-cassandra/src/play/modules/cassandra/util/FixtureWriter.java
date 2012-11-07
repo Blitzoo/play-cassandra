@@ -80,6 +80,38 @@ public class FixtureWriter {
             addMapModelFamily(cluster, keyspace, family, entitySimpleName);
         }
 
+        createOrUpdateColumnFamily(cluster, keyspace, family, entitySimpleName);
+        createOrUpdateCounterFamily(cluster, keyspace, entity, family);
+    }
+
+    private void createOrUpdateCounterFamily(Cluster cluster, String keyspace, Class entity, String family) throws ConnectionException {
+        // Regular models continue
+        Field[] fields = entity.getFields();
+        Boolean addCountersFamily = false;
+        for (Field field : fields) {
+            if (field.getAnnotation(play.modules.cassandra.annotations.Counter.class) != null){
+                addCountersFamily = true;
+            }
+        }
+        if (addCountersFamily) {
+            String counterFamily = String.format("%s_Counters", family);
+            if ( null != cluster.getKeyspace(keyspace).describeKeyspace().getColumnFamily(counterFamily)) {
+                CassandraLogger.info("Counter family: %s already exists", family);
+                return;
+            }
+            cluster.addColumnFamily(
+                    cluster.makeColumnFamilyDefinition()
+                            .setName(counterFamily)
+                            .setKeyspace(keyspace)
+                            .setDefaultValidationClass("CounterColumnType")
+                            .setComparatorType("UTF8Type")
+                            .setReplicateOnWrite(true)
+            );
+            CassandraLogger.info("Added counter family: %s", family);
+        }
+    }
+
+    private void createOrUpdateColumnFamily(Cluster cluster, String keyspace, String family, String entitySimpleName) throws ConnectionException {
         ColumnFamilyDefinition cfDef = cluster.getKeyspace(keyspace).describeKeyspace().getColumnFamily(family);
         if ( null != cfDef) {
             CassandraLogger.info("Cassandra.Model family: %s already exists", family);
@@ -126,30 +158,6 @@ public class FixtureWriter {
             }
 
             cluster.addColumnFamily(cfDef);
-
-            // Regular models continue
-            Field[] fields = entity.getFields();
-            Boolean addCountersFamily = false;
-            for (Field field : fields) {
-                if (field.getAnnotation(play.modules.cassandra.annotations.Counter.class) != null){
-                    addCountersFamily = true;
-                }
-            }
-            if (addCountersFamily) {
-                String counterFamily = String.format("%s_Counters", family);
-                if ( null != cluster.getKeyspace(keyspace).describeKeyspace().getColumnFamily(counterFamily)) {
-                    CassandraLogger.info("MapModel family: %s already exists", family);
-                    return;
-                }
-                cluster.addColumnFamily(
-                        cluster.makeColumnFamilyDefinition()
-                                .setName(counterFamily)
-                                .setKeyspace(keyspace)
-                                .setDefaultValidationClass("CounterColumnType")
-                                .setComparatorType("UTF8Type")
-                                .setReplicateOnWrite(true)
-                );
-            }
         }
     }
 

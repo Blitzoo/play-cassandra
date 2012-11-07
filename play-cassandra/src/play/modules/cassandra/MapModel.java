@@ -1,7 +1,7 @@
 package play.modules.cassandra;
 
 import play.Play;
-import play.exceptions.UnexpectedException;
+import play.exceptions.DatabaseException;
 import play.modules.cassandra.providers.CassandraProvider;
 import play.modules.cassandra.providers.H2Provider;
 
@@ -108,8 +108,8 @@ public class MapModel extends HashMap<String, String> {
         try {
             Class<? extends MapModel> clazz = (Class<? extends MapModel>)Play.classloader.loadClass(vType);
             return ds().findComposites(clazz, rowKey);
-        } catch (Exception e) {
-            throw new UnexpectedException(e);
+        } catch (ClassNotFoundException e) {
+            throw new DatabaseException("ClassNotFound while performing MapModel _findAll", e);
         }
     }
 
@@ -126,8 +126,12 @@ public class MapModel extends HashMap<String, String> {
             Map<String, String> map = ds().findComposite(cfName, rowKey, dictionaryKey);
             t.putAll(map, false);
             return t;
-        } catch (Exception e) {
-            throw new UnexpectedException(e);
+        } catch (ClassNotFoundException e) {
+            throw new DatabaseException("ClassNotFound while loading MapModel", e);
+        } catch (InstantiationException e) {
+            throw new DatabaseException("InstantiationException while loading MapModel", e);
+        } catch (IllegalAccessException e) {
+            throw new DatabaseException("IllegalAccessException while loading MapModel", e);
         }
     }
 
