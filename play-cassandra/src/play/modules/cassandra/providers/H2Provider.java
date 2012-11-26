@@ -680,6 +680,8 @@ public class H2Provider implements CassandraDB {
     }
 
     public int deleteComposite(String cfName, String key, String dictionary, String dictKey) {
+        assertTable(cfName);
+
         int rowsAffected = 0;
         Connection conn = getConnection();
         try {
