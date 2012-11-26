@@ -635,7 +635,10 @@ public class H2Provider implements CassandraDB {
         }
     }
 
+
     public void writeComposite(String cfName, String rowKey, String dictionaryKey, String key, String value, Integer ttl ) {
+        deleteComposite(cfName,  rowKey, dictionaryKey, key);
+
         Connection conn = getConnection();
         try {
             assertTable(cfName);

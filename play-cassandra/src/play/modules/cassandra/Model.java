@@ -93,7 +93,6 @@ public class Model implements Serializable, play.db.Model
     public static <T extends Model> T create(Class<T> type, String name,
             Map<String, String[]> params, Annotation[] annotations) {
         try {
-            CassandraLogger.debug("Creating class %s", name);
             Constructor<T> c = type.getDeclaredConstructor();
             c.setAccessible(true);
             Object model = c.newInstance();
