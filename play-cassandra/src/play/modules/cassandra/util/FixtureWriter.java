@@ -36,15 +36,19 @@ public class FixtureWriter {
     AstyanaxContext<Cluster> _clusterContext;
 
     public static void main(String[] args) throws Exception {
-        // initiate play! framework
-        File root = new File(System.getProperty("application.path"));
-        //System.setProperty("application.mode", "dev");
-        Play.init(root, System.getProperty("play.id", ""));
-        VirtualFile appRoot = VirtualFile.open(Play.applicationPath);
-        Play.javaPath.add(0, appRoot.child("conf"));
-        Thread.currentThread().setContextClassLoader(Play.classloader);
-        FixtureWriter writer = new FixtureWriter();
-        writer.run();
+        try {
+            // initiate play! framework
+            File root = new File(System.getProperty("application.path"));
+            //System.setProperty("application.mode", "dev");
+            Play.init(root, System.getProperty("play.id", ""));
+            VirtualFile appRoot = VirtualFile.open(Play.applicationPath);
+            Play.javaPath.add(0, appRoot.child("conf"));
+            Thread.currentThread().setContextClassLoader(Play.classloader);
+            FixtureWriter writer = new FixtureWriter();
+            writer.run();
+        } catch ( Exception e ) {
+            e.printStackTrace();
+        }
         System.exit(0);
     }
 

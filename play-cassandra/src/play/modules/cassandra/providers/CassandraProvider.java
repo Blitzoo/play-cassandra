@@ -18,6 +18,7 @@ import com.netflix.astyanax.serializers.StringSerializer;
 import com.netflix.astyanax.thrift.ThriftFamilyFactory;
 import com.netflix.astyanax.util.RangeBuilder;
 import org.joda.time.DateTime;
+import play.Logger;
 import play.Play;
 import play.exceptions.DatabaseException;
 import play.exceptions.UnexpectedException;
@@ -46,6 +47,10 @@ public class CassandraProvider implements CassandraDB {
 		}
 		return _instance;
 	}
+
+    public Keyspace getRawKeyspace() {
+        return getKeyspace();
+    }
 
 	private CassandraProvider()
 	{
@@ -287,8 +292,17 @@ public class CassandraProvider implements CassandraDB {
             ColumnFamily<String, CompositeJoinOrdinals> cf = new ColumnFamily<String, CompositeJoinOrdinals>(cfName,
                     StringSerializer.get(), joinSerializer);
 
-            // Querying cassandra for an entire row
-            OperationResult<ColumnList<CompositeJoinOrdinals>> result = keyspace.prepareQuery(cf)
+            if ( null == cfName ) {
+                Logger.warn("cfName is Null");
+                return models;
+            }
+
+            if ( null == key ) {
+                Logger.warn("key is Null");
+                return models;
+            }
+
+            OperationResult<ColumnList<CompositeJoinOrdinals>> result  = keyspace.prepareQuery(cf)
                     .getKey(key)
                     .execute();
 

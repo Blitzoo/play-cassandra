@@ -1,6 +1,7 @@
 package play.modules.cassandra.providers;
 
 import com.google.gson.Gson;
+import com.netflix.astyanax.Keyspace;
 import com.netflix.astyanax.model.ColumnFamily;
 import com.netflix.astyanax.serializers.StringSerializer;
 import org.joda.time.DateTime;
@@ -28,6 +29,16 @@ public class H2Provider implements CassandraDB {
 
     H2Provider() {
         _ds = DB.datasource;
+    }
+
+    /**
+     * No keyspace in H2 - consumer needs to know how to handle
+     * null return from this function
+     *
+     * @return
+     */
+    public Keyspace getRawKeyspace() {
+        return null;
     }
 
     private Connection getConnection() {
@@ -339,10 +350,8 @@ public class H2Provider implements CassandraDB {
                         pstmt.setString(++fieldCount, new Gson().toJson(idList));
                     } else if ( play.db.Model.class.isAssignableFrom(objClazz) ) {
                         play.db.Model model = (play.db.Model)field.get(o);
-                        Logger.debug("Field %d: %s", fieldCount+1, model._key().toString());
                         pstmt.setString(++fieldCount, model._key().toString());
                     } else {
-                        Logger.debug("Field %d: %s", fieldCount+1, field.get(o).toString());
                         pstmt.setString(++fieldCount, field.get(o).toString());
                     }
                 }

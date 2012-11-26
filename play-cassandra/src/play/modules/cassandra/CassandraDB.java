@@ -1,5 +1,6 @@
 package play.modules.cassandra;
 
+import com.netflix.astyanax.Keyspace;
 import com.netflix.astyanax.model.ColumnFamily;
 
 import java.util.List;
@@ -41,4 +42,6 @@ public interface CassandraDB {
     public String getProviderType();
 
     String getHosts();
+
+    Keyspace getRawKeyspace();
 }

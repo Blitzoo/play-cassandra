@@ -1,5 +1,6 @@
 package play.modules.cassandra;
 
+import com.netflix.astyanax.Keyspace;
 import com.netflix.astyanax.connectionpool.NodeDiscoveryType;
 import com.netflix.astyanax.connectionpool.impl.ConnectionPoolType;
 import com.netflix.astyanax.mapping.Id;
@@ -23,7 +24,7 @@ import java.math.BigDecimal;
 import java.util.*;
 
 public class CassandraPlugin extends PlayPlugin {
-	public static final String VERSION = "0.5";
+	public static final String VERSION = "0.5.4";
 	private final CassandraEnhancer e_ = new CassandraEnhancer();
     private static CassandraDB _instance;
     private static CassandraMonitor _cassandraMonitor;
@@ -38,6 +39,10 @@ public class CassandraPlugin extends PlayPlugin {
             }
         }
         return _instance;
+    }
+
+    public static Keyspace getRawKeyspace() {
+        return _instance.getRawKeyspace();
     }
 
     public static void deleteMapModels() {

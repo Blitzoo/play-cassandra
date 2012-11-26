@@ -6,7 +6,7 @@ MODULE = 'cassandra'
 
 # Commands that are specific to your module
 
-COMMANDS = ['cassandra:schema', 'cassandra:apply', 'cassandra:tempbalances', 'cassandra:tempcreate']
+COMMANDS = ['cassandra:apply']
 
 def execute(**kargs):
     command = kargs.get("command")
@@ -14,34 +14,7 @@ def execute(**kargs):
     args = kargs.get("args")
     env = kargs.get("env")
 
-    if command == "cassandra:schema":
-        print "~ Generating Cassandra schema from the database objects"
-        print "~ "
-        java_cmd = app.java_cmd([], None, "play.modules.cassandra.util.SchemaExtractor", args)
-        try:
-            subprocess.call(java_cmd, env=os.environ)
-        except OSError:
-            print "Could not execute the java executable, please make sure the JAVA_HOME environment variable is set properly (the java executable should reside at JAVA_HOME/bin/java). "
-            sys.exit(-1)
-    elif command == "cassandra:tempbalances":
-        print "~ Listing all account balances"
-        print "~ "
-        java_cmd = app.java_cmd([], None, "play.modules.cassandra.util.temp.AccountBalances", args)
-        try:
-            subprocess.call(java_cmd, env=os.environ)
-        except OSError:
-            print "Could not execute the java executable, please make sure the JAVA_HOME environment variable is set properly (the java executable should reside at JAVA_HOME/bin/java). "
-            sys.exit(-1)
-    elif command == "cassandra:tempcreate":
-        print "~ Listing creation date for all accounts"
-        print "~ "
-        java_cmd = app.java_cmd([], None, "play.modules.cassandra.util.temp.AccountRegister", args)
-        try:
-            subprocess.call(java_cmd, env=os.environ)
-        except OSError:
-            print "Could not execute the java executable, please make sure the JAVA_HOME environment variable is set properly (the java executable should reside at JAVA_HOME/bin/java). "
-            sys.exit(-1)
-    elif command == "cassandra:apply":
+    if command == "cassandra:apply":
         print "~ Updating Fixtures in the Cassandra cluster"
         print "~ "
         java_cmd = app.java_cmd([], None, "play.modules.cassandra.util.FixtureWriter", args)
