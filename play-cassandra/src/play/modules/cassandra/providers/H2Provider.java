@@ -7,9 +7,10 @@ import com.netflix.astyanax.serializers.StringSerializer;
 import org.joda.time.DateTime;
 import play.Logger;
 import play.Play;
-import play.db.DB;
+import play.db.*;
 import play.exceptions.UnexpectedException;
 import play.modules.cassandra.*;
+import play.modules.cassandra.Model;
 
 import javax.sql.DataSource;
 import java.lang.reflect.Field;
@@ -341,10 +342,14 @@ public class H2Provider implements CassandraDB {
                         List<String> idList = new ArrayList<String>();
                         List<play.db.Model> relations = (List<play.db.Model>)field.get(o);
                         if ( null != relations ) {
-                            for ( play.db.Model model : relations ) {
-                                if ( null != model && null != model._key() ) {
-                                    idList.add(model._key().toString());
+                            try {
+                                for ( play.db.Model model : relations ) {
+                                    if ( null != model && null != model._key() ) {
+                                        idList.add(model._key().toString());
+                                    }
                                 }
+                            } catch ( ClassCastException e ) {
+                                // ???
                             }
                         }
                         pstmt.setString(++fieldCount, new Gson().toJson(idList));

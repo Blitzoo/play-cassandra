@@ -96,9 +96,9 @@ class CassandraEnhancer extends Enhancer {
         ctClass.addMethod(all);
 
         // #--------------------- BEGIN TIMESTAMP ACCESSORS
-        CtMethod getCreated = CtMethod.make("public org.joda.time.DateTime getCreated() { return new org.joda.time.DateTime(this.created); }", ctClass);
+        CtMethod getCreated = CtMethod.make("public Long getCreated() { return this.created; }", ctClass);
         ctClass.addMethod(getCreated);
-        CtMethod getUpdated = CtMethod.make("public org.joda.time.DateTime getUpdated() { return new org.joda.time.DateTime(this.updated); }", ctClass);
+        CtMethod getUpdated = CtMethod.make("public Long getUpdated() { return this.updated; }", ctClass);
         ctClass.addMethod(getUpdated);
         // #--------------------- END TIMESTAMP ACCESSORS
 
