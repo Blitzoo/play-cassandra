@@ -235,6 +235,15 @@ public class FixtureWriter {
 
         List<Class> entities = Play.classloader.getAnnotatedClasses(play.modules.cassandra.annotations.Entity.class);
         for ( Class entity : entities ) {
+            boolean columnFamilyAlreadyExists = false;
+            String family = entity.getName().replaceAll("models\\.", "");
+
+            ColumnFamilyDefinition cfDef = cluster.getKeyspace(keyspace).describeKeyspace().getColumnFamily(family);
+            // Column family does not previously exist
+            if ( null != cfDef) {
+                columnFamilyAlreadyExists = true;
+            }
+
             addColumnFamily(cluster, keyspace, entity);
             Model.Fixture fixture = (Model.Fixture) entity.getAnnotation(Model.Fixture.class);
             if ( null != fixture) {
@@ -243,8 +252,13 @@ public class FixtureWriter {
                         CassandraLogger.info("Deleting existing entries for %s", entity.getSimpleName());
                         Fixtures.delete(entity);
                     }
-                    CassandraLogger.info("Loading fixtures for %s", entity.getSimpleName());
-                    Fixtures.loadModels(String.format("%s", fixture.value()));
+
+                    if ( !columnFamilyAlreadyExists || fixture.replaceModels() ) {
+                        CassandraLogger.info("Loading fixtures for %s", entity.getSimpleName());
+                        Fixtures.loadModels(String.format("%s", fixture.value()));
+                    } else {
+                        CassandraLogger.info("%s already exists - NOT loading fixtures. If you want to load fixtures overtop of this data, set the @Fixtures 'replaceAll' flag to 'true'", entity.getSimpleName());
+                    }
                 } catch ( JPAException e ) {
                     CassandraLogger.warn("Received JPA error: " + e.getMessage());
                 }
